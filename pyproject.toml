@@ -19,5 +19,6 @@ dependencies = [
     "ply",
     "pylint",
     "mypy",
-    "black"
+    "black",
+    "graphviz",
 ]
