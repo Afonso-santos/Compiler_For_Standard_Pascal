@@ -1,6 +1,6 @@
 import ply.lex as lex
 
-# Lista de tokens (sem usar reserved)
+# Lista de tokens
 tokens = [
     "IDENT",
     "NUM_INT",

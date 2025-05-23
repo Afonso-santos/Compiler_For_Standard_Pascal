@@ -123,9 +123,9 @@ class Context:
         """Add a variable to the current scope"""
         addr = self.allocate_var_address(name)
         self.variables[name] = {
-            "type": var_type, 
+            "type": var_type,
             "is_reference": is_reference,
-            "address": addr
+            "address": addr,
         }
         self.add_symbol(name, "variable", var_type)
 
@@ -178,14 +178,26 @@ class Context:
         return addr
 
     def get_var_address(self, var_name: str) -> int:
-        """Get or allocate address for a variable"""
+        """Get address for a variable, allocate if not exists"""
         if var_name not in self.var_addresses:
             self.var_addresses[var_name] = self.next_addr
             self.next_addr += 1
         return self.var_addresses[var_name]
 
     def allocate_var_address(self, var_name: str) -> int:
-        """Allocate a new address for a variable"""
-        addr = self.get_next_var_address()
+        """Allocate new address for variable"""
+        addr = self.next_addr
         self.var_addresses[var_name] = addr
+        self.next_addr += 1
         return addr
+
+    def get_array_base_address(self, array_name: str) -> int:
+        # Get the base address for an array variable
+        return self.get_var_address(array_name)
+
+    def allocate_array(self, array_name: str, size: int) -> int:
+        # Allocate space for an array and return its base address
+        base_addr = self.next_addr  # Fixed: next_address -> next_addr
+        self.var_addresses[array_name] = base_addr
+        self.next_addr += size  # Fixed: next_address -> next_addr
+        return base_addr

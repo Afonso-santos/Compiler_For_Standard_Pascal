@@ -2,9 +2,9 @@ import sys
 import os
 
 import ply.yacc as yacc
-from Lexer import tokens
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from language import (
     ProgramNode,
     ProgramHeadingNode,
@@ -66,8 +66,10 @@ from language import (
     SimpleExpressionNode,
     AdditionOperatorNode,
     MultiplicativeOperatorNode,
+    UnsignedConstantNode,
+    WhileStatementNode,
 )
-from language import Context  # Ensure Context is imported
+from language import Context
 
 # Define precedence to resolve ambiguity in the grammar
 precedence = (
@@ -96,7 +98,7 @@ class Node:
         for child in self.children:
             if isinstance(child, Node):
                 ret += child._to_string(level + 1)
-            elif hasattr(child, '_to_string'):  # Check if it has a _to_string method
+            elif hasattr(child, "_to_string"):  # Check if it has a _to_string method
                 ret += child._to_string(level + 1)
             else:
                 # Handle non-Node children (e.g., strings)
@@ -171,18 +173,19 @@ def p_constantDefinition(p):
 
 def p_constant(p):
     """constant : unsignedNumber
-                | sign unsignedNumber
-                | identifier
-                | sign identifier
-                | string
-                | constantChr"""
+    | sign unsignedNumber
+    | identifier
+    | sign identifier
+    | string
+    | constantChr"""
     if len(p) == 2:
-        p[0] = ConstantNode(str(p[1].value))  # wrap in ConstantNode
-    else:
-        sign = p[1].value if hasattr(p[1], 'value') else p[1]
-        value = p[2].value if hasattr(p[2], 'value') else p[2]
-        p[0] = ConstantNode(sign + str(value))
 
+        value = p[1].value if isinstance(p[1], Node) else str(p[1])
+        p[0] = ConstantNode(value)
+    else:
+        sign = p[1].value if isinstance(p[1], Node) else str(p[1])
+        val = p[2].value if isinstance(p[2], Node) else str(p[2])
+        p[0] = ConstantNode(sign + val)
 
 
 def p_unsignedNumber(p):
@@ -315,8 +318,8 @@ def p_recordType(p):
 
 def p_fieldList(p):
     """fieldList : fixedPart
-                 | fixedPart SEMI variantPart
-                 | variantPart"""
+    | fixedPart SEMI variantPart
+    | variantPart"""
     if len(p) > 2:
         p[0] = FieldListNode([p[1], p[3]])
     else:
@@ -350,7 +353,7 @@ def p_variantPart(p):
 
 def p_tag(p):
     """tag : identifier COLON typeIdentifier
-           | typeIdentifier"""
+    | typeIdentifier"""
     if len(p) > 2:
         p[0] = TagNode(p[1], p[3])
     else:
@@ -412,13 +415,12 @@ def p_variableDeclarationBlock(p):
 
 def p_variableDeclarationList(p):
     """variableDeclarationList : variableDeclarationList SEMI variableDeclaration
-                                | variableDeclaration"""
+    | variableDeclaration"""
     if len(p) > 2:
         p[1].declarations.append(p[3])
         p[0] = p[1]
     else:
         p[0] = VariableDeclarationList([p[1]])
-
 
 
 def p_variableDeclaration(p):
@@ -573,12 +575,11 @@ def p_additiveOperator(p):
 
 def p_term(p):
     """term : factor
-            | term multiplicativeOperator factor"""
+    | term multiplicativeOperator factor"""
     if len(p) > 2:
         p[0] = TermNode(p[1], p[3], p[2])
     else:
         p[0] = p[1]
-
 
 
 def p_multiplicativeOperator(p):
@@ -593,13 +594,15 @@ def p_multiplicativeOperator(p):
 def p_factor(p):
     """factor : variable
     | unsignedConstant
+    | TRUE
+    | FALSE
     | LPAREN expression RPAREN"""
-    if len(p) == 2:
-        # Handle variable or unsigned constant
+    if isinstance(p[1], str) and p[1] in ["TRUE", "FALSE"]:
+        p[0] = UnsignedConstantNode(p[1] == "TRUE")
+    elif len(p) == 2:
         p[0] = p[1]
     else:
-        # Handle parenthesized expression
-        p[0] = Node("parenthesizedExpression", [p[2]])
+        p[0] = p[2]
 
 
 def p_unsignedConstant(p):
@@ -673,11 +676,10 @@ def p_forStatement(p):
     p[0] = ForStatementNode(p[2], p[4], p[6], p[8], direction)
 
 
-
 # Add while statement rule
 def p_whileStatement(p):
     """whileStatement : WHILE expression DO statement"""
-    p[0] = Node("whileStatement", [p[2], p[4]])
+    p[0] = WhileStatementNode(p[2], p[4])
 
 
 # Add repeat statement rule

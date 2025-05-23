@@ -16,7 +16,7 @@ $ pip install .
 ```
 
 ```
-$ python src/Yaccer.py <test_path> 
+$ python src/Yaccer.py -v <test_path> 
 ```
 
 

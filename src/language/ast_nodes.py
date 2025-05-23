@@ -1,6 +1,33 @@
-from .Node import Node, Context
 from typing import List, Tuple, Optional
 from graphviz import Graph
+from language.compiler_context import Context
+
+
+class Node:
+    def __init__(self, type, children=None, leaf=None):
+        self.type = type
+        self.children = children if children else []
+        self.leaf = leaf
+
+    def _to_string(self, level=0):
+        ret = "  " * level + self.type
+        if self.leaf is not None:
+            ret += ": " + str(self.leaf)
+        ret += "\n"
+        for child in self.children:
+            if isinstance(child, Node):
+                ret += child._to_string(level + 1)
+            else:
+                # Handle non-Node children (e.g., strings)
+                ret += "  " * (level + 1) + str(child) + "\n"
+        return ret
+
+    def to_vm(self, context: Context) -> None:
+        print("to_vm not implemented for this node type")
+        print(self.type)
+
+    def __str__(self):
+        return self._to_string()
 
 
 class ProgramNode(Node):
@@ -74,6 +101,11 @@ class IdentifierNode(Node):
 
     def to_string(self, context) -> str:
         return self.value
+
+    def to_vm(self, context: Context) -> str:
+        # Get variable address and load its value from global memory
+        addr = context.get_var_address(self.value)
+        return f"PUSHG {addr}  // Load {self.value}"
 
     def validate(self, context) -> Tuple[bool, List[str]]:
         return True, []
@@ -217,37 +249,20 @@ class ProcedureStatementNode(Node):
         )
 
     def to_vm(self, context: Context) -> str:
-        if self.identifier.value.lower() == "write":
+        if self.identifier.value.lower() == "writeln":
             vm_code = []
             for expr in self.expr_list.expressions:
+                vm_code.append(expr.to_vm(context))
                 if isinstance(expr, StringNode):
-                    vm_code.append(f'PUSHS "{expr.value}"')
                     vm_code.append("WRITES")
                 else:
-                    vm_code.append(expr.to_vm(context))
                     vm_code.append("WRITEI")
-            return "\n".join(vm_code)
-        elif self.identifier.value.lower() == "writeln":
-            vm_code = []
-            if self.expr_list and self.expr_list.expressions:
-                for expr in self.expr_list.expressions:
-                    if isinstance(expr, StringNode):
-                        vm_code.append(f'PUSHS "{expr.value}"')
-                        vm_code.append("WRITES")
-                    else:
-                        vm_code.append(expr.to_vm(context))
-                        vm_code.append("WRITEI")
             vm_code.append("WRITELN")
             return "\n".join(vm_code)
         elif self.identifier.value.lower() == "readln":
-            vm_code = []
-            vm_code.append("READ")  # Read string from keyboard
-            vm_code.append("ATOI")  # Convert string to integer
-            # Store in variable
             var = self.expr_list.expressions[0]
-            var_addr = context.get_next_var_address()
-            vm_code.append(f"STOREG {var_addr}")
-            return "\n".join(vm_code)
+            var_addr = context.get_var_address(var.identifier.value)
+            return f"READ\nATOI\nSTOREG {var_addr}"
         return ""
 
     def validate(self, context) -> Tuple[bool, List[str]]:
@@ -342,6 +357,7 @@ class EmptyStatementNode(Node):
         graph.node(str(node_id), self.name)
         return node_id
 
+
 class VariableDeclarationBlock(Node):
     def __init__(self, declarations: List[Node]):
         super().__init__("variableDeclarationBlock", declarations)
@@ -351,14 +367,13 @@ class VariableDeclarationBlock(Node):
         return "\n".join(decl.to_string(context) for decl in self.declarations)
 
     def to_vm(self, context: Context) -> str:
-        # Allocate space for variables
         vm_code = []
         for decl in self.declarations:
-            identifiers = decl.identifier.identifiers
-            for id_node in identifiers:
-                vm_code.append(f"PUSHG 0")  # Initialize with 0
-                vm_code.append(f"STOREG {context.get_next_var_address()}")
-        return '\n'.join(vm_code)
+            for id_node in decl.identifier_list.identifiers:
+                addr = context.allocate_var_address(id_node.value)
+                vm_code.append(f"PUSHI 0  // Initialize {id_node.value}")
+                vm_code.append(f"STOREG {addr}")
+        return "\n".join(vm_code)
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
@@ -376,6 +391,7 @@ class VariableDeclarationBlock(Node):
             decl_id = decl.append_to_graph(graph)
             graph.edge(str(node_id), str(decl_id))
         return node_id
+
 
 class VariableDeclarationList(Node):
     def __init__(self, declarations=None):
@@ -471,6 +487,7 @@ class IdentifierListNode(Node):
             graph.edge(str(node_id), str(id_id))
         return node_id
 
+
 class TypeIdentifierNode(Node):
     def __init__(self, value: str):
         super().__init__("typeIdentifier", [], value)
@@ -503,7 +520,9 @@ class VariableNode(Node):
         return self.identifier.to_string(context)
 
     def to_vm(self, context: Context) -> str:
-        return f"LOAD {self.identifier.value}"
+        # Get variable address and load its value from global memory
+        addr = context.get_var_address(self.identifier.value)
+        return f"PUSHG {addr}  // Load {self.identifier.value}"
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
@@ -533,25 +552,23 @@ class IfStatementNode(Node):
 
     def to_vm(self, context: Context) -> str:
         label_count = context.get_next_label()
-        else_label = f"ELSE_{label_count}"
-        end_label = f"ENDIF_{label_count}"
+        else_label = f"ELSE{label_count}"
+        end_label = f"ENDIF{label_count}"
         
         vm_code = []
-        # Evaluate condition
         vm_code.append(self.condition.to_vm(context))
         vm_code.append(f"JZ {else_label}")
-        
-        # Then block
         vm_code.append(self.then_block.to_vm(context))
-        vm_code.append(f"JUMP {end_label}")
         
-        # Else block
-        vm_code.append(f"{else_label}:")
         if self.else_block:
+            vm_code.append(f"JUMP {end_label}")
+            vm_code.append(f"{else_label}:")
             vm_code.append(self.else_block.to_vm(context))
-        
+        else:
+            vm_code.append(f"{else_label}:")
+            
         vm_code.append(f"{end_label}:")
-        return '\n'.join(vm_code)
+        return "\n".join(vm_code)
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
@@ -591,25 +608,26 @@ class ExpressionNode(Node):
         # Generate VM code for left and right expressions
         left_code = self.left.to_vm(context)
         right_code = self.right.to_vm(context)
-        
+
         # Map operators to VM instructions
         op_map = {
-            '+': 'ADD',
-            '-': 'SUB', 
-            '*': 'MUL',
-            '/': 'DIV',
-            'mod': 'MOD',
-            'and': 'AND',
-            'or': 'OR'
+            "+": "ADD",
+            "-": "SUB",
+            "*": "MUL",
+            "/": "DIV",
+            "mod": "MOD",
+            "and": "AND",
+            "div": "DIV",
+            "or": "OR",
         }
-        
+
         if isinstance(self.operator, RelationalOperatorNode):
             return f"{left_code}\n{right_code}\n{self.operator.to_vm(context)}"
-        
-        op = op_map.get(self.operator.value, 'NOP')
+
+        print(f"Converting Expression operation: {self.operator.value}")
+        op = op_map.get(self.operator.value, "NOP")
+
         return f"{left_code}\n{right_code}\n{op}"
-
-
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
@@ -644,12 +662,12 @@ class AssigmentStatementNode(Node):
         return f"{self.variable.to_string(context)} := {self.expression.to_string(context)};"
 
     def to_vm(self, context: Context) -> str:
-        # Evaluate expression
+        # Generate expression code
         expr_code = self.expression.to_vm(context)
-        # Store result in variable
+        # Get variable address
         var_addr = context.get_var_address(self.variable.identifier.value)
         return f"{expr_code}\nSTOREG {var_addr}"
-        
+
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
 
@@ -669,6 +687,7 @@ class AssigmentStatementNode(Node):
         graph.edge(str(node_id), str(expr_id))
         return node_id
 
+
 class RelationalOperatorNode(Node):
     def __init__(self, value: str):
         super().__init__("relationalOperator", [], value)
@@ -679,14 +698,14 @@ class RelationalOperatorNode(Node):
 
     def to_vm(self, context: Context) -> str:
         op_map = {
-            '>': 'SUP',
-            '<': 'INF',
-            '>=': 'SUPEQ',
-            '<=': 'INFEQ',
-            '=': 'EQUAL',
-            '<>': 'NOT'
+            ">": "SUP",
+            "<": "INF",
+            ">=": "SUPEQ",
+            "<=": "INFEQ",
+            "=": "EQUAL",
+            "<>": "EQUAL\nNOT",
         }
-        return op_map.get(self.value, 'NOP')
+        return op_map.get(self.value, "NOP")
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
@@ -699,8 +718,16 @@ class RelationalOperatorNode(Node):
         graph.node(str(node_id), f"{self.name}: {self.value}")
         return node_id
 
+
 class ForStatementNode(Node):
-    def __init__(self, identifier: Node, start_expr: Node, end_expr: Node, block: Node, direction: str):
+    def __init__(
+        self,
+        identifier: Node,
+        start_expr: Node,
+        end_expr: Node,
+        block: Node,
+        direction: str,
+    ):
         super().__init__("forStatement", [identifier, start_expr, end_expr, block])
         self.identifier = identifier
         self.start_expr = start_expr
@@ -715,48 +742,50 @@ class ForStatementNode(Node):
         )
 
     def to_vm(self, context: Context) -> str:
+        print(f"Converting ForStatement: {self.identifier.value}")
         label_count = context.get_next_label()
-        loop_start_label = f"FOR_START_{label_count}"
-        loop_end_label = f"FOR_END_{label_count}"
-        
+        loop_label = f"loop{label_count}"
+        end_label = f"endloop{label_count}"
+        var_addr = context.get_var_address(self.identifier.value)
+
         vm_code = []
 
         # Initialize loop variable
-        vm_code.append(f"{self.identifier.to_vm(context)} := {self.start_expr.to_vm(context)}")
+        vm_code.append(self.start_expr.to_vm(context))  # Push initial value (1)
+        vm_code.append(f"STOREG {var_addr}")  # Store in i
 
-        # Loop start label
-        vm_code.append(f"{loop_start_label}:")
+        # Loop start
+        vm_code.append(f"{loop_label}:")
 
-        # Condition check
+        # Compare loop variable with end value
+        vm_code.append(f"PUSHG {var_addr}")  # Push current value of i
+        vm_code.append(self.end_expr.to_vm(context))  # Push n
+
         if self.direction == "to":
-            # If identifier > end_expr, exit loop
-            vm_code.append(self.identifier.to_vm(context))
-            vm_code.append(self.end_expr.to_vm(context))
-            vm_code.append(f"GT")
-            vm_code.append(f"JZ {loop_end_label}")
-        else:  # downto
-            # If identifier < end_expr, exit loop
-            vm_code.append(self.identifier.to_vm(context))
-            vm_code.append(self.end_expr.to_vm(context))
-            vm_code.append(f"LT")
-            vm_code.append(f"JZ {loop_end_label}")
+            vm_code.append("INFEQ")  # i <= n
+        else:
+            vm_code.append("SUPEQ")  # i >= n
+
+        vm_code.append(f"JZ {end_label}")  # If false, exit loop
 
         # Execute loop body
         vm_code.append(self.block.to_vm(context))
 
-        # Increment or decrement
+        # Increment or decrement counter
+        vm_code.append(f"PUSHG {var_addr}")  # Push i
         if self.direction == "to":
-            vm_code.append(f"{self.identifier.to_vm(context)} := {self.identifier.to_vm(context)} + 1")
+            vm_code.append("PUSHI 1")
+            vm_code.append("ADD")  # i + 1
         else:
-            vm_code.append(f"{self.identifier.to_vm(context)} := {self.identifier.to_vm(context)} - 1")
+            vm_code.append("PUSHI 1")
+            vm_code.append("SUB")  # i - 1
+        vm_code.append(f"STOREG {var_addr}")  # Store new i
 
-        # Jump back to start
-        vm_code.append(f"JUMP {loop_start_label}")
+        # Continue loop
+        vm_code.append(f"JUMP {loop_label}")
+        vm_code.append(f"{end_label}:")
 
-        # End label
-        vm_code.append(f"{loop_end_label}:")
-
-        return '\n'.join(vm_code)
+        return "\n".join(vm_code)
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
@@ -784,6 +813,7 @@ class ForStatementNode(Node):
         graph.edge(str(node_id), str(block_id))
         return node_id
 
+
 class TermNode(Node):
     def __init__(self, left: Node, right: Node, operator: Node):
         super().__init__("term", [left, operator, right])
@@ -795,27 +825,19 @@ class TermNode(Node):
         return f"{self.left.to_string(context)} {self.operator.to_string(context)} {self.right.to_string(context)}"
 
     def to_vm(self, context: Context) -> str:
-        # Generate VM code for left and right expressions
+        print(f"Converting Term operation: {self.operator.value}")
         left_code = self.left.to_vm(context)
         right_code = self.right.to_vm(context)
-        
-        # Map operators to VM instructions
         op_map = {
-            '+': 'ADD',
-            '-': 'SUB', 
-            '*': 'MUL',
-            '/': 'DIV',
-            'mod': 'MOD',
-            'and': 'AND',
-            'or': 'OR'
+            "*": "MUL",
+            "/": "DIV", 
+            "div": "DIV",
+            "mod": "MOD",
+            "and": "AND"
         }
-        
-        if isinstance(self.operator, RelationalOperatorNode):
-            return f"{left_code}\n{right_code}\n{self.operator.to_vm(context)}"
-        
-        op = op_map.get(self.operator.value, 'NOP')
+        op = op_map.get(self.operator.value.lower(), "NOP")
         return f"{left_code}\n{right_code}\n{op}"
-    
+
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
 
@@ -826,6 +848,7 @@ class TermNode(Node):
             and self.right == other.right
             and self.operator == other.operator
         )
+
     def append_to_graph(self, graph: Graph) -> int:
         node_id = len(graph.body)
         graph.node(str(node_id), self.name)
@@ -836,6 +859,7 @@ class TermNode(Node):
         graph.edge(str(node_id), str(op_id))
         graph.edge(str(node_id), str(right_id))
         return node_id
+
 
 class ConstantDefinitionBlock(Node):
     def __init__(self, definitions: List[Node]):
@@ -865,6 +889,7 @@ class ConstantDefinitionBlock(Node):
             graph.edge(str(node_id), str(defn_id))
         return node_id
 
+
 class ConstantDefinitionList(Node):
     def __init__(self, definitions=None):
         self.definitions = definitions if definitions else []
@@ -873,15 +898,19 @@ class ConstantDefinitionList(Node):
 
     def to_string(self, context: Context) -> str:
         return ", ".join(defn.to_string(context) for defn in self.definitions)
+
     def to_vm(self, context: Context) -> str:
         return ""
+
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
-    def __eq__(self, other) -> bool:    
+
+    def __eq__(self, other) -> bool:
         return (
             isinstance(other, ConstantDefinitionList)
             and self.definitions == other.definitions
         )
+
     def __iter__(self):
         """Make this class iterable by returning an iterator over definitions"""
         return iter(self.definitions)
@@ -894,6 +923,7 @@ class ConstantDefinitionList(Node):
             graph.edge(str(node_id), str(defn_id))
         return node_id
 
+
 class ConstantDefinition(Node):
     def __init__(self, identifier: Node, value: Node):
         super().__init__("constantDefinition", [identifier, value])
@@ -901,7 +931,9 @@ class ConstantDefinition(Node):
         self.value = value
 
     def to_string(self, context: Context) -> str:
-        return f"{self.identifier.to_string(context)} = {self.value.to_string(context)};"
+        return (
+            f"{self.identifier.to_string(context)} = {self.value.to_string(context)};"
+        )
 
     def to_vm(self, context: Context) -> str:
         return ""
@@ -925,6 +957,7 @@ class ConstantDefinition(Node):
         graph.edge(str(node_id), str(val_id))
         return node_id
 
+
 class ConstantNode(Node):
     def __init__(self, value: str):
         super().__init__("constant", [], value)
@@ -947,6 +980,7 @@ class ConstantNode(Node):
         graph.node(str(node_id), f"{self.name}: {self.value}")
         return node_id
 
+
 class UnsignedIntegerNode(Node):
     def __init__(self, value: str):
         super().__init__("unsignedInteger", [], value)
@@ -956,7 +990,7 @@ class UnsignedIntegerNode(Node):
         return self.value
 
     def to_vm(self, context: Context) -> str:
-        return f'PUSHS {self.value}'
+        return f"PUSHI {self.value}"
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
@@ -969,6 +1003,7 @@ class UnsignedIntegerNode(Node):
         graph.node(str(node_id), f"{self.name}: {self.value}")
         return node_id
 
+
 class UnsignedRealNode(Node):
     def __init__(self, value: str):
         super().__init__("unsignedReal", [], value)
@@ -978,7 +1013,7 @@ class UnsignedRealNode(Node):
         return self.value
 
     def to_vm(self, context: Context) -> str:
-        return f'PUSHS {self.value}'
+        return f"PUSHS {self.value}"
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
@@ -991,6 +1026,7 @@ class UnsignedRealNode(Node):
         graph.node(str(node_id), f"{self.name}: {self.value}")
         return node_id
 
+
 class SignNode(Node):
     def __init__(self, value: str):
         super().__init__("sign", [], value)
@@ -1000,7 +1036,9 @@ class SignNode(Node):
         return self.value
 
     def to_vm(self, context: Context) -> str:
-        return ""  # Sign application usually handled in ConstantNode or arithmetic logic
+        return (
+            ""  # Sign application usually handled in ConstantNode or arithmetic logic
+        )
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
@@ -1047,13 +1085,16 @@ class TypeDeclarationBlock(Node):
 
     def to_vm(self, context: Context) -> str:
         return ""
+
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
+
     def __eq__(self, other) -> bool:
         return (
             isinstance(other, TypeDeclarationBlock)
             and self.declarations == other.declarations
         )
+
     def append_to_graph(self, graph: Graph) -> int:
         node_id = len(graph.body)
         graph.node(str(node_id), self.name)
@@ -1062,25 +1103,32 @@ class TypeDeclarationBlock(Node):
             graph.edge(str(node_id), str(decl_id))
         return node_id
 
+
 class TypeDefinitionList(Node):
     def __init__(self, definitions=None):
         self.definitions = definitions if definitions else []
         # Pass definitions
         super().__init__("typeDefinitionList", children=self.definitions)
+
     def to_string(self, context: Context) -> str:
         return ", ".join(defn.to_string(context) for defn in self.definitions)
+
     def to_vm(self, context: Context) -> str:
         return ""
+
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
+
     def __eq__(self, other) -> bool:
         return (
             isinstance(other, TypeDefinitionList)
             and self.definitions == other.definitions
         )
+
     def __iter__(self):
         """Make this class iterable by returning an iterator over definitions"""
         return iter(self.definitions)
+
     def append_to_graph(self, graph: Graph) -> int:
         node_id = len(graph.body)
         graph.node(str(node_id), self.name)
@@ -1088,6 +1136,7 @@ class TypeDefinitionList(Node):
             defn_id = defn.append_to_graph(graph)
             graph.edge(str(node_id), str(defn_id))
         return node_id
+
 
 class TypeDefinition(Node):
     def __init__(self, identifier: Node, type_node: Node):
@@ -1143,6 +1192,7 @@ class ScalarTypeNode(Node):
         graph.node(str(node_id), f"{self.name}: {self.value}")
         return node_id
 
+
 class SubRangeTypeNode(Node):
     def __init__(self, lower_bound: Node, upper_bound: Node):
         super().__init__("subRangeType", [lower_bound, upper_bound])
@@ -1174,6 +1224,7 @@ class SubRangeTypeNode(Node):
         graph.edge(str(node_id), str(upper_id))
         return node_id
 
+
 class StringTypeNode(Node):
     def __init__(self, length: Node):
         super().__init__("stringType", [length])
@@ -1197,6 +1248,7 @@ class StringTypeNode(Node):
         length_id = self.length.append_to_graph(graph)
         graph.edge(str(node_id), str(length_id))
         return node_id
+
 
 class ArrayTypeNode(Node):
     def __init__(self, index_type: Node, element_type: Node):
@@ -1229,6 +1281,7 @@ class ArrayTypeNode(Node):
         graph.edge(str(node_id), str(element_id))
         return node_id
 
+
 class TypeListNode(Node):
     def __init__(self, types: List[Node]):
         super().__init__("typeList", types)
@@ -1244,10 +1297,7 @@ class TypeListNode(Node):
         return True, []
 
     def __eq__(self, other) -> bool:
-        return (
-            isinstance(other, TypeListNode)
-            and self.types == other.types
-        )
+        return isinstance(other, TypeListNode) and self.types == other.types
 
     def append_to_graph(self, graph: Graph) -> int:
         node_id = len(graph.body)
@@ -1256,6 +1306,7 @@ class TypeListNode(Node):
             type_id = type_node.append_to_graph(graph)
             graph.edge(str(node_id), str(type_id))
         return node_id
+
 
 class recordTypeNode(Node):
     def __init__(self, fields: List[Node]):
@@ -1272,10 +1323,7 @@ class recordTypeNode(Node):
         return True, []
 
     def __eq__(self, other) -> bool:
-        return (
-            isinstance(other, recordTypeNode)
-            and self.fields == other.fields
-        )
+        return isinstance(other, recordTypeNode) and self.fields == other.fields
 
     def append_to_graph(self, graph: Graph) -> int:
         node_id = len(graph.body)
@@ -1284,6 +1332,7 @@ class recordTypeNode(Node):
             field_id = field.append_to_graph(graph)
             graph.edge(str(node_id), str(field_id))
         return node_id
+
 
 class FieldListNode(Node):
     def __init__(self, fields: List[Node]):
@@ -1300,13 +1349,12 @@ class FieldListNode(Node):
         return True, []
 
     def __eq__(self, other) -> bool:
-        return (
-            isinstance(other, FieldListNode)
-            and self.fields == other.fields
-        )
+        return isinstance(other, FieldListNode) and self.fields == other.fields
+
     def __iter__(self):
         """Make this class iterable by returning an iterator over fields"""
         return iter(self.fields)
+
     def append_to_graph(self, graph: Graph) -> int:
         node_id = len(graph.body)
         graph.node(str(node_id), self.name)
@@ -1314,6 +1362,7 @@ class FieldListNode(Node):
             field_id = field.append_to_graph(graph)
             graph.edge(str(node_id), str(field_id))
         return node_id
+
 
 class FixedPartNode(Node):
     def __init__(self, fields: List[Node]):
@@ -1330,10 +1379,7 @@ class FixedPartNode(Node):
         return True, []
 
     def __eq__(self, other) -> bool:
-        return (
-            isinstance(other, FixedPartNode)
-            and self.fields == other.fields
-        )
+        return isinstance(other, FixedPartNode) and self.fields == other.fields
 
     def append_to_graph(self, graph: Graph) -> int:
         node_id = len(graph.body)
@@ -1359,10 +1405,7 @@ class RecordSectionList(Node):
         return True, []
 
     def __eq__(self, other) -> bool:
-        return (
-            isinstance(other, RecordSectionList)
-            and self.sections == other.sections
-        )
+        return isinstance(other, RecordSectionList) and self.sections == other.sections
 
     def append_to_graph(self, graph: Graph) -> int:
         node_id = len(graph.body)
@@ -1371,6 +1414,7 @@ class RecordSectionList(Node):
             section_id = section.append_to_graph(graph)
             graph.edge(str(node_id), str(section_id))
         return node_id
+
 
 class RecordSectionNode(Node):
     def __init__(self, identifier: Node, type_node: Node):
@@ -1403,6 +1447,7 @@ class RecordSectionNode(Node):
         graph.edge(str(node_id), str(type_id))
         return node_id
 
+
 class VariantPartNode(Node):
     def __init__(self, identifier: Node, type_node: Node):
         super().__init__("variantPart", [identifier, type_node])
@@ -1433,6 +1478,7 @@ class VariantPartNode(Node):
         graph.edge(str(node_id), str(id_id))
         graph.edge(str(node_id), str(type_id))
         return node_id
+
 
 class TagNode(Node):
     def __init__(self, identifier: Node, type_node: Node):
@@ -1465,6 +1511,7 @@ class TagNode(Node):
         graph.edge(str(node_id), str(type_id))
         return node_id
 
+
 class VariantListNode(Node):
     def __init__(self, tags: List[Node]):
         super().__init__("variantList", tags)
@@ -1480,10 +1527,7 @@ class VariantListNode(Node):
         return True, []
 
     def __eq__(self, other) -> bool:
-        return (
-            isinstance(other, VariantListNode)
-            and self.tags == other.tags
-        )
+        return isinstance(other, VariantListNode) and self.tags == other.tags
 
     def append_to_graph(self, graph: Graph) -> int:
         node_id = len(graph.body)
@@ -1492,6 +1536,7 @@ class VariantListNode(Node):
             tag_id = tag.append_to_graph(graph)
             graph.edge(str(node_id), str(tag_id))
         return node_id
+
 
 class VariantNode(Node):
     def __init__(self, identifier: Node, type_node: Node):
@@ -1524,6 +1569,7 @@ class VariantNode(Node):
         graph.edge(str(node_id), str(type_id))
         return node_id
 
+
 class ConstListNode(Node):
     def __init__(self, constants: List[Node]):
         super().__init__("constList", constants)
@@ -1537,14 +1583,14 @@ class ConstListNode(Node):
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
+
     def __eq__(self, other) -> bool:
-        return (
-            isinstance(other, ConstListNode)
-            and self.constants == other.constants
-        )
+        return isinstance(other, ConstListNode) and self.constants == other.constants
+
     def __iter__(self):
         """Make this class iterable by returning an iterator over constants"""
         return iter(self.constants)
+
     def append_to_graph(self, graph: Graph) -> int:
         node_id = len(graph.body)
         graph.node(str(node_id), self.name)
@@ -1570,8 +1616,7 @@ class SetTypeNode(Node):
 
     def __eq__(self, other) -> bool:
         return (
-            isinstance(other, SetTypeNode)
-            and self.element_type == other.element_type
+            isinstance(other, SetTypeNode) and self.element_type == other.element_type
         )
 
     def append_to_graph(self, graph: Graph) -> int:
@@ -1580,6 +1625,7 @@ class SetTypeNode(Node):
         type_id = self.element_type.append_to_graph(graph)
         graph.edge(str(node_id), str(type_id))
         return node_id
+
 
 class ProcedureDeclarationNode(Node):
     def __init__(self, identifier: Node, params: Node, block: Node):
@@ -1616,6 +1662,7 @@ class ProcedureDeclarationNode(Node):
         graph.edge(str(node_id), str(block_id))
         return node_id
 
+
 class FormalParameterListNode(Node):
     def __init__(self, parameters: List[Node]):
         super().__init__("formalParameterList", parameters)
@@ -1644,6 +1691,7 @@ class FormalParameterListNode(Node):
             graph.edge(str(node_id), str(param_id))
         return node_id
 
+
 class FormalParameterSectionListNode(Node):
     def __init__(self, sections: List[Node]):
         super().__init__("formalParameterSectionList", sections)
@@ -1671,6 +1719,7 @@ class FormalParameterSectionListNode(Node):
             section_id = section.append_to_graph(graph)
             graph.edge(str(node_id), str(section_id))
         return node_id
+
 
 class FormalParameterSectionNode(Node):
     def __init__(self, identifier: Node, type_node: Node):
@@ -1703,6 +1752,7 @@ class FormalParameterSectionNode(Node):
         graph.edge(str(node_id), str(type_id))
         return node_id
 
+
 class ParameterGroupNode(Node):
     def __init__(self, identifier: Node, type_node: Node):
         super().__init__("parameterGroup", [identifier, type_node])
@@ -1734,9 +1784,12 @@ class ParameterGroupNode(Node):
         graph.edge(str(node_id), str(type_id))
         return node_id
 
+
 class FunctionDeclarationNode(Node):
     def __init__(self, identifier: Node, params: Node, return_type: Node, block: Node):
-        super().__init__("functionDeclaration", [identifier, params, return_type, block])
+        super().__init__(
+            "functionDeclaration", [identifier, params, return_type, block]
+        )
         self.identifier = identifier
         self.params = params
         self.return_type = return_type
@@ -1773,17 +1826,29 @@ class FunctionDeclarationNode(Node):
         graph.edge(str(node_id), str(block_id))
         return node_id
 
+
 class IndexedVariableNode(Node):
     def __init__(self, identifier: Node, index: Node):
         super().__init__("indexedVariable", [identifier, index])
         self.identifier = identifier
         self.index = index
+        self.value = None
 
     def to_string(self, context: Context) -> str:
         return f"{self.identifier.to_string(context)}[{self.index.to_string(context)}]"
 
     def to_vm(self, context: Context) -> str:
-        return ""
+        # Get base address for array
+        base_addr = context.get_array_base_address(self.identifier.value)
+
+        # Generate code for index computation
+        index_code = self.index.to_vm(context)
+
+        # Load value from array at computed index
+        return f"""{index_code}     // Compute index
+PUSHI {base_addr}  // Array base address
+ADD           // Calculate array offset
+LOADN         // Load value from array"""
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
@@ -1804,9 +1869,16 @@ class IndexedVariableNode(Node):
         graph.edge(str(node_id), str(index_id))
         return node_id
 
+
 class SimpleExpressionNode(Node):
-    def __init__(self, left: Node, operator: Optional[Node] = None, right: Optional[Node] = None):
-        children = [left] if not operator else [left, operator] if not right else [left, operator, right]
+    def __init__(
+        self, left: Node, operator: Optional[Node] = None, right: Optional[Node] = None
+    ):
+        children = (
+            [left]
+            if not operator
+            else [left, operator] if not right else [left, operator, right]
+        )
         super().__init__("simpleExpression", children)
         self.left = left
         self.operator = operator
@@ -1828,7 +1900,7 @@ class SimpleExpressionNode(Node):
             return f"{left_code}\n{right_code}\n{op_code}"
         elif self.operator:
             term_code = self.left.to_vm(context)
-            if self.operator.value == '-':
+            if self.operator.value == "-":
                 return f"{term_code}\nNEG"
             else:
                 return term_code  # + sign is no-op
@@ -1856,6 +1928,7 @@ class SimpleExpressionNode(Node):
             graph.edge(str(node_id), str(self.right.append_to_graph(graph)))
         return node_id
 
+
 class AdditionOperatorNode(Node):
     def __init__(self, value: str):
         super().__init__("additionOperator", [], value)
@@ -1865,7 +1938,8 @@ class AdditionOperatorNode(Node):
         return self.value
 
     def to_vm(self, context: Context) -> str:
-        return f"ADD {self.value}"
+        op_map = {"+": "ADD", "-": "SUB", "or": "OR"}
+        return op_map.get(self.value, "NOP")
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
@@ -1878,6 +1952,7 @@ class AdditionOperatorNode(Node):
         graph.node(str(node_id), f"{self.name}: {self.value}")
         return node_id
 
+
 class MultiplicativeOperatorNode(Node):
     def __init__(self, value: str):
         super().__init__("multiplicativeOperator", [], value)
@@ -1887,15 +1962,226 @@ class MultiplicativeOperatorNode(Node):
         return self.value
 
     def to_vm(self, context: Context) -> str:
-        return f"MULT {self.value}"
+        op_map = {"*": "MUL", "/": "DIV", "div": "DIV", "mod": "MOD", "and": "AND"}
+        return op_map.get(self.value.lower(), "NOP")
+
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
+
     def __eq__(self, other) -> bool:
-        return isinstance(other, MultiplicativeOperatorNode) and self.value == other.value
+        return (
+            isinstance(other, MultiplicativeOperatorNode) and self.value == other.value
+        )
+
     def append_to_graph(self, graph: Graph) -> int:
         node_id = len(graph.body)
         graph.node(str(node_id), f"{self.name}: {self.value}")
         return node_id
 
 
+class FactorNode(Node):
+    def __init__(self, value: str):
+        super().__init__("factor", [], value)
+        self.value = value
 
+    def to_string(self, context: Context) -> str:
+        return self.value
+
+    def to_vm(self, context: Context) -> str:
+        if isinstance(self.value, (int, float)):
+            return f"PUSHI {self.value}"
+        return self.value.to_vm(context)
+
+    def validate(self, context: Context) -> Tuple[bool, List[str]]:
+        return True, []
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, FactorNode) and self.value == other.value
+
+    def append_to_graph(self, graph: Graph) -> int:
+        node_id = len(graph.body)
+        graph.node(str(node_id), f"{self.name}: {self.value}")
+        return node_id
+
+
+class UnsignedConstantNode(Node):
+    def __init__(self, value):
+        super().__init__("unsignedConstant", [], value)
+        self.value = value
+
+    def to_string(self, context: Context) -> str:
+        return str(self.value)
+
+    def to_vm(self, context: Context) -> str:
+        if isinstance(self.value, bool):
+            return f"PUSHI {1 if self.value else 0}"
+        elif isinstance(self.value, (int, float)):
+            return f"PUSHI {self.value}"
+        elif isinstance(self.value, str):
+            return f'PUSHS "{self.value}"'
+        return str(self.value)
+
+    def validate(self, context: Context) -> Tuple[bool, List[str]]:
+        return True, []
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, UnsignedConstantNode) and self.value == other.value
+
+    def append_to_graph(self, graph: Graph) -> int:
+        node_id = len(graph.body)
+        graph.node(str(node_id), f"{self.name}: {self.value}")
+        return node_id
+
+
+class WhileStatementNode(Node):
+    def __init__(self, condition: Node, block: Node):
+        super().__init__("whileStatement", [condition, block])
+        self.condition = condition
+        self.block = block
+
+    def to_string(self, context: Context) -> str:
+        return f"while {self.condition.to_string(context)} do {self.block.to_string(context)}"
+
+    def to_vm(self, context: Context) -> str:
+        label_count = context.get_next_label()
+        start_label = f"WHILE{label_count}"
+        end_label = f"ENDWHILE{label_count}"
+        vm_code = []
+        vm_code.append(f"{start_label}:")
+        # Evaluate condition
+        vm_code.append(self.condition.to_vm(context))
+        vm_code.append(f"JZ {end_label}")
+        # Loop body
+        vm_code.append(self.block.to_vm(context))
+        # Jump back to start
+        vm_code.append(f"JUMP {start_label}")
+        vm_code.append(f"{end_label}:")
+        return "\n".join(line for line in vm_code if line.strip())
+
+
+    def validate(self, context: Context) -> Tuple[bool, List[str]]:
+        return True, []
+
+    def __eq__(self, other) -> bool:
+        return (
+            isinstance(other, WhileStatementNode)
+            and self.condition == other.condition
+            and self.block == other.block
+        )
+
+    def append_to_graph(self, graph: Graph) -> int:
+        node_id = len(graph.body)
+        graph.node(str(node_id), self.name)
+        condition_id = self.condition.append_to_graph(graph)
+        block_id = self.block.append_to_graph(graph)
+        graph.edge(str(node_id), str(condition_id))
+        graph.edge(str(node_id), str(block_id))
+        return node_id
+
+
+class BooleanConstantNode(Node):
+    def __init__(self, value: bool):
+        super().__init__("boolean", [], str(value).lower())
+        self.value = value
+
+    def to_vm(self, context):
+        return f"PUSHI {1 if self.value else 0}"
+
+    def to_string(self, context):
+        return "true" if self.value else "false"
+
+    def validate(self, context: Context) -> Tuple[bool, List[str]]:
+        return True, []
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, BooleanConstantNode) and self.value == other.value
+
+    def append_to_graph(self, graph: Graph) -> int:
+        node_id = len(graph.body)
+        graph.node(str(node_id), f"{self.name}: {self.value}")
+        return node_id
+
+
+class ParenthesizedExpressionNode(Node):
+    def __init__(self, expression: Node):
+        super().__init__("parenthesizedExpression", [expression])
+        self.expression = expression
+
+    def to_string(self, context: Context) -> str:
+        return f"({self.expression.to_string(context)})"
+
+    def to_vm(self, context: Context) -> str:
+        # Just evaluate the inner expression
+        return self.expression.to_vm(context)
+
+    def validate(self, context: Context) -> Tuple[bool, List[str]]:
+        return True, []
+
+    def __eq__(self, other) -> bool:
+        return (
+            isinstance(other, ParenthesizedExpressionNode)
+            and self.expression == other.expression
+        )
+
+    def append_to_graph(self, graph: Graph) -> int:
+        node_id = len(graph.body)
+        graph.node(str(node_id), self.name)
+        expression_id = self.expression.append_to_graph(graph)
+        graph.edge(str(node_id), str(expression_id))
+        return node_id
+
+
+class FormattedExpressionNode(Node):
+    def __init__(
+        self, variable: Node, expression: Node, format_expression: Optional[Node] = None
+    ):
+        children = (
+            [variable, expression]
+            if not format_expression
+            else [variable, expression, format_expression]
+        )
+        super().__init__("formattedExpression", children)
+        self.variable = variable
+        self.expression = expression
+        self.format_expression = format_expression
+
+    def to_string(self, context: Context) -> str:
+        if self.format_expression:
+            return f"{self.variable.to_string(context)}:{self.expression.to_string(context)}:{self.format_expression.to_string(context)}"
+        return (
+            f"{self.variable.to_string(context)}:{self.expression.to_string(context)}"
+        )
+
+    def to_vm(self, context: Context) -> str:
+        # Generate code for variable and expression
+        var_code = self.variable.to_vm(context)
+        expr_code = self.expression.to_vm(context)
+
+        # If there's a format expression, include it
+        if self.format_expression:
+            format_code = self.format_expression.to_vm(context)
+            return f"{var_code}\n{expr_code}\n{format_code}"
+        return f"{var_code}\n{expr_code}"
+
+    def validate(self, context: Context) -> Tuple[bool, List[str]]:
+        return True, []
+
+    def __eq__(self, other) -> bool:
+        return (
+            isinstance(other, FormattedExpressionNode)
+            and self.variable == other.variable
+            and self.expression == other.expression
+            and self.format_expression == other.format_expression
+        )
+
+    def append_to_graph(self, graph: Graph) -> int:
+        node_id = len(graph.body)
+        graph.node(str(node_id), self.name)
+        var_id = self.variable.append_to_graph(graph)
+        expr_id = self.expression.append_to_graph(graph)
+        graph.edge(str(node_id), str(var_id))
+        graph.edge(str(node_id), str(expr_id))
+        if self.format_expression:
+            format_id = self.format_expression.append_to_graph(graph)
+            graph.edge(str(node_id), str(format_id))
+        return node_id
