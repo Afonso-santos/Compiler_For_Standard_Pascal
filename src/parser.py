@@ -11,7 +11,7 @@ from language.ast_nodes import (
     StringNode,
     CompoundStatementNode,
     StatementsNode,
-    ProcedureStatementNode,
+    CallStatementNode,
     ExpressionListNode,
     EmptyStatementNode,
     IdentifierNode,
@@ -94,11 +94,13 @@ def p_program(p):
 
 def p_programHeading(p):
     """programHeading : PROGRAM identifier SEMI"""
+    print(f"Program heading found: {p[2]}")
     p[0] = ProgramHeadingNode(p[2])
 
 
 def p_identifier(p):
     """identifier : IDENT"""
+    print(f"Identifier found: {p[1]}")
     p[0] = IdentifierNode(p[1])
 
 
@@ -111,10 +113,12 @@ def p_declarations(p):
     """declarations : declaration declarations
     | empty"""
     if len(p) > 2:
-        p[0] = DeclarationsNode([p[1]] + p[2].children)
+        if isinstance(p[1], list):
+            p[0] = DeclarationsNode(p[1] + p[2].children)
+        else:
+            p[0] = DeclarationsNode([p[1]] + p[2].children)
     else:
         p[0] = DeclarationsNode([])
-
 
 def p_declaration(p):
     """declaration : constantDefinitionBlock
@@ -141,6 +145,7 @@ def p_constantDefinitionList(p):
 
 def p_constantDefinition(p):
     """constantDefinition : identifier EQUAL constant"""
+    print(f"Constant definition found: {p[1]} = {p[3]}")
     p[0] = ConstantDefinition(p[1], p[3])
 
 
@@ -151,6 +156,7 @@ def p_constant(p):
     | sign identifier
     | string
     | constantChr"""
+    print("Constant found")
     if len(p) == 2:
         p[0] = ConstantNode(str(p[1].value))  # wrap in ConstantNode
     else:
@@ -228,6 +234,7 @@ def p_scalarType(p):
 def p_identifierList(p):
     """identifierList : identifierList COMMA identifier
     | identifier"""
+    print(f"Identifier list found: {p[1]}")
     if len(p) > 2:
         p[1].children.append(p[3])
         p[0] = p[1]
@@ -242,6 +249,7 @@ def p_subrangeType(p):
 
 def p_identifierType(p):
     """identifierType : IDENT"""
+    print(f"Identifier type found: {p[1]}")
     p[0] = IdentifierNode(p[1])
 
 
@@ -338,6 +346,7 @@ def p_typeIdentifier(p):
     | BOOLEAN
     | CHAR
     | STRING"""
+    print(f"Type identifier found: {p[1]}")
     if isinstance(p[1], IdentifierNode):  # If it's an identifier node
         p[0] = TypeIdentifierNode(p[1].value)
     else:  # If it's a keyword like INTEGER, REAL, etc.
@@ -400,19 +409,26 @@ def p_variableDeclaration(p):
 
 
 def p_procedureAndFunctionDeclarationBlock(p):
-    """procedureAndFunctionDeclarationBlock : procedureDeclaration
-    | functionDeclaration"""
+    """procedureAndFunctionDeclarationBlock : procedureDeclaration SEMI
+                                            | functionDeclaration SEMI"""
     p[0] = p[1]
 
 
 def p_procedureDeclaration(p):
-    """procedureDeclaration : PROCEDURE identifier formalParameterList_opt SEMI block"""
-    p[0] = ProcedureDeclarationNode(p[2], p[3], p[5])
+    """procedureDeclaration : PROCEDURE identifier SEMI block
+                            | PROCEDURE identifier formalParameterList_opt SEMI block"""
+    # Store procedure in context with its block
+
+    procedure_name = p[2].value
+    procedure_block = p[4]
+    context = Context()
+    context.add_procedure(procedure_name, procedure_block)
+    p[0] = ProcedureDeclarationNode(p[2], None, p[4])
 
 
 def p_formalParameterList_opt(p):
     """formalParameterList_opt : formalParameterList
-    | empty"""
+                               | empty"""
     p[0] = p[1]
 
 
@@ -423,7 +439,7 @@ def p_formalParameterList(p):
 
 def p_formalParameterSectionList(p):
     """formalParameterSectionList : formalParameterSectionList SEMI formalParameterSection
-    | formalParameterSection"""
+                                  | formalParameterSection"""
     if len(p) > 2:
         p[1].children.append(p[3])
         p[0] = p[1]
@@ -449,6 +465,10 @@ def p_parameterGroup(p):
 
 def p_functionDeclaration(p):
     """functionDeclaration : FUNCTION identifier formalParameterList_opt COLON resultType SEMI block"""
+#    function_name = p[2].value
+#    function_block = p[6]
+#    context = Context()
+#    context.add_function(function_name, p[5], p[3].parameters if p[3] else [])
     p[0] = FunctionDeclarationNode(p[2], p[3], p[5], p[7])
 
 
@@ -459,44 +479,53 @@ def p_resultType(p):
 
 def p_compoundStatement(p):
     """compoundStatement : BEGIN statements END"""
+
     p[0] = CompoundStatementNode(p[2])
 
 
+
 def p_statements(p):
-    """statements : statements SEMI statement
-    | statement"""
-    if len(p) > 2:
+    """statements : statementList"""
+    p[0] = p[1]
+
+def p_statementList(p):
+    """statementList : statementList SEMI statement
+                     | statement"""
+    if len(p) == 4:
         if isinstance(p[1], StatementsNode):
-            if p[3] is not None:  # Only add non-None statements
+            if p[3] is not None:
                 p[1].statements.append(p[3])
             p[0] = p[1]
         else:
             p[0] = StatementsNode([p[1], p[3]])
     else:
-        p[0] = StatementsNode([p[1]] if p[1] is not None else [])
-
+        p[0] = StatementsNode([p[1]])
 
 def p_statement(p):
     """statement : simpleStatement
-    | structuredStatement"""
+                 | structuredStatement """
+
     p[0] = p[1]
 
 
 def p_simpleStatement(p):
-    """simpleStatement : assignmentStatement
-    | procedureStatement
-    | emptyStatement_"""
+    """simpleStatement : callStatement 
+                       | assignmentStatement
+                       | emptyStatement_"""
+    print(f"Simple statement found: {p[1]}")
     p[0] = p[1]
 
 
 def p_assignmentStatement(p):
-    """assignmentStatement : variable ASSIGN expression"""
+    """assignmentStatement : variable ASSIGN Init_Final"""
+    print(f"Assignment statement found: {p[1]} = {p[3]}")
     p[0] = AssigmentStatementNode(p[1], p[3])
 
 
 def p_variable(p):
     """variable : identifier
-    | indexedVariable"""
+                | indexedVariable"""
+    print(f"Variable found: {p[1]}")
     p[0] = VariableNode(p[1])
 
 
@@ -507,7 +536,8 @@ def p_indexedVariable(p):
 
 def p_expression(p):
     """expression : simpleExpression
-    | simpleExpression relationalOperator simpleExpression"""
+                  | simpleExpression relationalOperator simpleExpression
+                 """
     if len(p) > 2:
         p[0] = ExpressionNode(p[1], p[3], p[2])
     else:
@@ -564,8 +594,9 @@ def p_multiplicativeOperator(p):
 
 def p_factor(p):
     """factor : variable
-    | unsignedConstant
-    | LPAREN expression RPAREN"""
+        | unsignedConstant
+        | LPAREN expression RPAREN"""
+    print(f"Factor found: {p[1]}")
     if len(p) == 2:
         # Handle variable or unsigned constant
         p[0] = p[1]
@@ -588,13 +619,16 @@ def p_unsignedConstant(p):
         p[0] = p[1]
 
 
-def p_procedureStatement(p):
-    """procedureStatement : identifier
-    | identifier LPAREN expressionList RPAREN"""
-    if len(p) > 2:
-        p[0] = ProcedureStatementNode(p[1], p[3])
+def p_callStatement(p):
+    """callStatement : identifier 
+                     | identifier LPAREN expressionList RPAREN"""
+    print(f"Call statement: {p[1]}")
+    if len(p) == 2:
+        # Simple procedure call without parameters
+        p[0] = CallStatementNode(p[1], None)
     else:
-        p[0] = ProcedureStatementNode(p[1], ExpressionListNode([]))
+        # Procedure call with parameters
+        p[0] = CallStatementNode(p[1], p[3])
 
 
 def p_expressionList(p):
@@ -615,6 +649,7 @@ def p_expressionList(p):
 def p_formattedExpression(p):
     """formattedExpression : variable COLON expression COLON expression
     | variable COLON expression"""
+
     if len(p) > 4:
         p[0] = FormattedExpressionNode(p[1], p[3], p[5])
     else:
@@ -641,10 +676,17 @@ def p_loopStatement(p):
 
 
 def p_forStatement(p):
-    """forStatement : FOR identifier ASSIGN expression TO expression DO statement
-    | FOR identifier ASSIGN expression DOWNTO expression DO statement"""
+    """forStatement : FOR identifier ASSIGN Init_Final TO Init_Final DO statement
+                    | FOR identifier ASSIGN Init_Final DOWNTO Init_Final DO statement"""
     direction = p[5].lower()
     p[0] = ForStatementNode(p[2], p[4], p[6], p[8], direction)
+
+
+def p_Init_Final(p):
+    """ Init_Final : callStatement
+                   | expression """
+                
+    p[0] = p[1]
 
 
 # Add while statement rule
@@ -692,6 +734,7 @@ parser = yacc.yacc()
 # Test function
 def parse(data):
     result = parser.parse(data)
+
     return result
 
 

@@ -155,6 +155,7 @@ class DeclarationsNode(Node):
         super().__init__("declarations", declarations if declarations else [])
         self.declarations = declarations if declarations else []
 
+
     def to_string(self, context) -> str:
         if not self.declarations:
             return ""  # Empty declarations
@@ -237,9 +238,9 @@ class StatementsNode(Node):
         return node_id
 
 
-class ProcedureStatementNode(Node):
+class CallStatementNode(Node):
     def __init__(self, identifier, expr_list):
-        super().__init__("procedureStatement", [identifier, expr_list])
+        super().__init__("callStatement", [identifier, expr_list])
         self.identifier = identifier
         self.expr_list = expr_list
 
@@ -249,7 +250,10 @@ class ProcedureStatementNode(Node):
         )
 
     def to_vm(self, context: Context) -> str:
-        if self.identifier.value.lower() == "writeln":
+        proc_name = self.identifier.value.lower()
+
+
+        if proc_name == "writeln" or proc_name =="write":
             vm_code = []
             for expr in self.expr_list.expressions:
                 vm_code.append(expr.to_vm(context))
@@ -259,29 +263,29 @@ class ProcedureStatementNode(Node):
                     vm_code.append("WRITEI")
             vm_code.append("WRITELN")
             return "\n".join(vm_code)
-        elif self.identifier.value.lower() == "readln":
+        elif proc_name == "readln":
             var = self.expr_list.expressions[0]
             var_addr = context.get_var_address(var.identifier.value)
             return f"READ\nATOI\nSTOREG {var_addr}"
-        return ""
+        elif proc_name == "length":
+            var = self.expr_list.expressions[0]
+            var_addr = context.get_var_address(var.identifier.value)
+            return f"PUSHG {var_addr}\nSTRLEN"
+        else:
+            # Handle user-defined procedures
+            procedure = context.get_procedure(proc_name)
+            if procedure:
+                # Generate unique label for this procedure call
+                label = context.get_next_label()
+                vm_code = [
+                    f"PUSHA PROC_{proc_name}_{label}",  # Push return address
+                    f"JUMP PROC_{proc_name}",           # Jump to procedure
+                    f"PROC_{proc_name}_{label}:"        # Return label
+                ]
+                return "\n".join(vm_code)
+            raise Exception(f"Undefined procedure: {proc_name}")
 
-    def validate(self, context) -> Tuple[bool, List[str]]:
-        return True, []
 
-    def __eq__(self, other) -> bool:
-        return (
-            isinstance(other, ProcedureStatementNode)
-            and self.identifier == other.identifier
-        )
-
-    def append_to_graph(self, graph: Graph) -> int:
-        node_id = len(graph.body)
-        graph.node(str(node_id), self.name)
-        id_id = self.identifier.append_to_graph(graph)
-        expr_id = self.expr_list.append_to_graph(graph)
-        graph.edge(str(node_id), str(id_id))
-        graph.edge(str(node_id), str(expr_id))
-        return node_id
 
 
 class ExpressionListNode(Node):
@@ -1712,6 +1716,10 @@ class FormalParameterSectionListNode(Node):
             and self.sections == other.sections
         )
 
+    def __iter__(self):
+        """Make this class iterable by returning an iterator over sections"""
+        return iter(self.sections)
+
     def append_to_graph(self, graph: Graph) -> int:
         node_id = len(graph.body)
         graph.node(str(node_id), self.name)
@@ -1787,19 +1795,47 @@ class ParameterGroupNode(Node):
 
 class FunctionDeclarationNode(Node):
     def __init__(self, identifier: Node, params: Node, return_type: Node, block: Node):
-        super().__init__(
-            "functionDeclaration", [identifier, params, return_type, block]
-        )
+        super().__init__("functionDeclaration", [identifier, params, return_type, block])
         self.identifier = identifier
         self.params = params
         self.return_type = return_type
         self.block = block
 
     def to_string(self, context: Context) -> str:
-        return f"function {self.identifier.to_string(context)}({self.params.to_string(context)}) : {self.return_type.to_string(context)} {self.block.to_string(context)}"
+        params = self.params.to_string(context) if self.params else ""
+        return f"function {self.identifier.to_string(context)}{params}: {self.return_type.to_string(context)};\n{self.block.to_string(context)}"
 
     def to_vm(self, context: Context) -> str:
-        return ""
+        # Get unique label for function
+        func_label = f"FUNC_{self.identifier.value}"
+        end_label = f"END_{self.identifier.value}"
+        
+        # Store function parameters
+        param_setup = []
+        if self.params:
+            for i, param in enumerate(self.params.parameters):
+                addr = context.allocate_var_address(param.identifier.value)
+                param_setup.append(f"STOREG {addr}  // Store param {param.identifier.value}")
+
+        vm_code = [
+            f"{func_label}:",  # Function label
+            "PUSHN 1  // Reserve space for return value"
+        ]
+        
+        # Add parameter setup code
+        vm_code.extend(param_setup)
+        
+        # Add function body code
+        vm_code.append(self.block.to_vm(context))
+        
+        # Add return sequence
+        vm_code.extend([
+            f"STOREL -1  // Store return value",
+            "RETURN",
+            f"{end_label}:"
+        ])
+        
+        return "\n".join(vm_code)
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []

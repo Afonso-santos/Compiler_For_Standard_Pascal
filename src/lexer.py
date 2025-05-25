@@ -156,16 +156,13 @@ def t_DIV(t):
     r"div"
     return t
 
-
-def t_DO(t):
-    r"do"
-    return t
-
-
 def t_DOWNTO(t):
     r"downto"
     return t
 
+def t_DO(t):
+    r"do"
+    return t
 
 def t_ELSE(t):
     r"else"
@@ -417,20 +414,17 @@ lexer = lex.lex()
 # For testing the lexer
 if __name__ == "__main__":
     data = """
-    program Example;
-    var
-        x, y: integer;
-        (* This is a comment *)
-        str: string;
+    program Test;
+
+    procedure Greet;
     begin
-        x := 42;
-        y := x + 10;
-        str := 'Hello, world!';
-        if x > y then
-            write('x is greater')
-        else
-            write('y is greater');
+        writeln('Hello from a procedure!');
+    end;
+
+    begin
+        Greet;
     end.
+
     """
 
     # Give the lexer some input

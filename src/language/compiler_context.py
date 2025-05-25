@@ -1,3 +1,8 @@
+from typing import Optional
+
+# If Node is defined elsewhere, import it as well:
+# from your_node_module import Node
+
 class Context:
     next_var = 0
 
@@ -87,6 +92,10 @@ class Context:
         # Current scope level (0 for global)
         self.level = 0 if parent is None else parent.level + 1
 
+        # Procedures table
+        self.procedures = {}
+        self.functions = {}
+
         # VM code generation
         self.label_counter = 0
         self.var_address = 0
@@ -147,11 +156,11 @@ class Context:
             name, "function", {"return_type": return_type, "parameters": parameters}
         )
 
-    def add_procedure(self, name, parameters=None):
-        """Add a procedure to the current scope"""
-        if parameters is None:
-            parameters = []
-        self.add_symbol(name, "procedure", {"parameters": parameters})
+    def add_procedure(self, name: str, block):
+        self.procedures[name.lower()] = block
+
+    def get_procedure(self, name: str) :
+        return self.procedures.get(name.lower())
 
     def create_child_scope(self, scope_name="", param_name=""):
         """Create a new child scope"""

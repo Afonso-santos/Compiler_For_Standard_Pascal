@@ -194,7 +194,6 @@ constList : constantList COMMA constant
           | constant
 
 
-functionDeclaration : FUNCTION identifier (formalParameterList)? COLON resultType SEMI block ;
 functionDeclaration : FUNCTION identifier formalParameterList_opt COLON resultType SEMI block
 
 
@@ -214,11 +213,6 @@ simpleStatement : assignmentStatement
 
 assignmentStatement : variable ASSIGN expression ;
 
-variable : (AT identifier | identifier) ( LBRACK expression (COMMA expression)* RBRACK
-                                        | LBRACK2 expression (COMMA expression)* RBRACK2
-                                        | DOT identifier
-                                        )*
-                                        ;
 
 variable : variableBase variableSuffixList
 
