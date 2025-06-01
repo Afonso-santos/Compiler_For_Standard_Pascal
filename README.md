@@ -1,4 +1,4 @@
-# Compiler_For_Standard_Pascal
+# Pascal Compiler
 
 # Setup
 
@@ -15,8 +15,16 @@ $ source .venv/bin/activate
 $ pip install .
 ```
 
+To compile pascal code to machine code:
+
 ```
-$ python src/Yaccer.py -v <test_path> 
+$ python src/parser.py -c <test_path> 
+```
+
+To visualize parsed code tree:
+
+```
+$ python src/parser.py -v <test_path> 
 ```
 
 
