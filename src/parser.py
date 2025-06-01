@@ -153,7 +153,7 @@ def p_constant(p):
     | sign identifier
     | string
     | constantChr"""
-    print("Constant found")
+
     if len(p) == 2:
         p[0] = ConstantNode(str(p[1].value))  # wrap in ConstantNode
     else:
@@ -458,7 +458,8 @@ def p_parameterGroup(p):
 
 
 def p_functionDeclaration(p):
-    """functionDeclaration : FUNCTION identifier formalParameterList_opt COLON resultType SEMI block"""
+    """functionDeclaration : FUNCTION identifier formalParameterList_opt COLON resultType SEMI block
+                           | FUNCTION identifier SEMI block"""
     p[0] = FunctionDeclarationNode(p[2], p[3], p[5], p[7])
 
 
