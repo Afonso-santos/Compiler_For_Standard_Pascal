@@ -94,13 +94,11 @@ def p_program(p):
 
 def p_programHeading(p):
     """programHeading : PROGRAM identifier SEMI"""
-    print(f"Program heading found: {p[2]}")
     p[0] = ProgramHeadingNode(p[2])
 
 
 def p_identifier(p):
     """identifier : IDENT"""
-    print(f"Identifier found: {p[1]}")
     p[0] = IdentifierNode(p[1])
 
 
@@ -145,7 +143,6 @@ def p_constantDefinitionList(p):
 
 def p_constantDefinition(p):
     """constantDefinition : identifier EQUAL constant"""
-    print(f"Constant definition found: {p[1]} = {p[3]}")
     p[0] = ConstantDefinition(p[1], p[3])
 
 
@@ -234,7 +231,6 @@ def p_scalarType(p):
 def p_identifierList(p):
     """identifierList : identifierList COMMA identifier
     | identifier"""
-    print(f"Identifier list found: {p[1]}")
     if len(p) > 2:
         p[1].children.append(p[3])
         p[0] = p[1]
@@ -249,7 +245,6 @@ def p_subrangeType(p):
 
 def p_identifierType(p):
     """identifierType : IDENT"""
-    print(f"Identifier type found: {p[1]}")
     p[0] = IdentifierNode(p[1])
 
 
@@ -346,7 +341,6 @@ def p_typeIdentifier(p):
     | BOOLEAN
     | CHAR
     | STRING"""
-    print(f"Type identifier found: {p[1]}")
     if isinstance(p[1], IdentifierNode):  # If it's an identifier node
         p[0] = TypeIdentifierNode(p[1].value)
     else:  # If it's a keyword like INTEGER, REAL, etc.
@@ -465,10 +459,6 @@ def p_parameterGroup(p):
 
 def p_functionDeclaration(p):
     """functionDeclaration : FUNCTION identifier formalParameterList_opt COLON resultType SEMI block"""
-#    function_name = p[2].value
-#    function_block = p[6]
-#    context = Context()
-#    context.add_function(function_name, p[5], p[3].parameters if p[3] else [])
     p[0] = FunctionDeclarationNode(p[2], p[3], p[5], p[7])
 
 
@@ -512,20 +502,17 @@ def p_simpleStatement(p):
     """simpleStatement : callStatement 
                        | assignmentStatement
                        | emptyStatement_"""
-    print(f"Simple statement found: {p[1]}")
     p[0] = p[1]
 
 
 def p_assignmentStatement(p):
     """assignmentStatement : variable ASSIGN Init_Final"""
-    print(f"Assignment statement found: {p[1]} = {p[3]}")
     p[0] = AssigmentStatementNode(p[1], p[3])
 
 
 def p_variable(p):
     """variable : identifier
                 | indexedVariable"""
-    print(f"Variable found: {p[1]}")
     p[0] = VariableNode(p[1])
 
 
@@ -596,7 +583,6 @@ def p_factor(p):
     """factor : variable
         | unsignedConstant
         | LPAREN expression RPAREN"""
-    print(f"Factor found: {p[1]}")
     if len(p) == 2:
         # Handle variable or unsigned constant
         p[0] = p[1]
@@ -622,7 +608,6 @@ def p_unsignedConstant(p):
 def p_callStatement(p):
     """callStatement : identifier 
                      | identifier LPAREN expressionList RPAREN"""
-    print(f"Call statement: {p[1]}")
     if len(p) == 2:
         # Simple procedure call without parameters
         p[0] = CallStatementNode(p[1], None)
@@ -768,8 +753,6 @@ def convert_to_machine_code(filepath):
                 print("Parsing failed. No machine code generated.")
     except FileNotFoundError:
         print("File not found. Please provide a valid file path.")
-    except Exception as e:
-        print(f"An error occurred: {e}")
     finally:
         print("Parsing completed.")
 

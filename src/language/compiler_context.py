@@ -130,12 +130,6 @@ class Context:
 
     def add_variable(self, name, var_type, is_reference=False):
         """Add a variable to the current scope"""
-        addr = self.allocate_var_address(name)
-        self.variables[name] = {
-            "type": var_type,
-            "is_reference": is_reference,
-            "address": addr,
-        }
         self.add_symbol(name, "variable", var_type)
 
     def add_constant(self, name, const_type, value):
@@ -148,6 +142,14 @@ class Context:
         self.types[name] = type_info
         self.add_symbol(name, "type", type_info)
 
+    def add_array(self, name, element_type, size=None):
+        """Add an array to the current scope"""
+        if size is None:
+            size = 0
+        self.add_symbol(
+            name, "array", {"element_type": element_type, "size": size}
+        )
+
     def add_function(self, name, return_type, parameters=None):
         """Add a function to the current scope"""
         if parameters is None:
@@ -156,8 +158,23 @@ class Context:
             name, "function", {"return_type": return_type, "parameters": parameters}
         )
 
-    def add_procedure(self, name: str, block):
+    def add_procedure(self, name: str, parameters=None, block=None):
+        """Add a procedure to the current scope."""
+        if parameters is None:
+            parameters = []
+        # 1) Record in symbols exactly like add_function does:
+        self.add_symbol(
+            name, 
+            "procedure", 
+            {
+                "parameters": parameters,
+                "block": block,           # store the AST node or code block
+                "return_type": None       # procedures don’t return a value
+            }
+        )
+        # 2) (Optional) Keep a separate lookup of name→block for quick access:
         self.procedures[name.lower()] = block
+
 
     def get_procedure(self, name: str) :
         return self.procedures.get(name.lower())
@@ -192,6 +209,25 @@ class Context:
             self.var_addresses[var_name] = self.next_addr
             self.next_addr += 1
         return self.var_addresses[var_name]
+    
+    def get_var_type(self, var_name: str) -> Optional[str]:
+        """Get the type of a variable"""
+        if var_name in self.variables:
+            return self.variables[var_name]["type"]
+        symbol = self.lookup_symbol(var_name)
+        if symbol and symbol["type"] == "variable":
+            return symbol["info"]
+        return None
+    
+    def is_function(self, name: str):
+
+        """Check if a symbol is a function"""
+        symbol = self.lookup_symbol("func" + name)
+        return symbol is not None and symbol["type"] == "function"
+
+    def is_procedure(self,name:str):
+        symbol = self.lookup_symbol("proc" + name)
+        return symbol is not None and symbol["type"] == "procedure"
 
     def allocate_var_address(self, var_name: str) -> int:
         """Allocate new address for variable"""

@@ -23,8 +23,7 @@ class Node:
         return ret
 
     def to_vm(self, context: Context) -> None:
-        print("to_vm not implemented for this node type")
-        print(self.type)
+        print(f"VM code conversion not implemented for the {self.type} node type")
 
     def __str__(self):
         return self._to_string()
@@ -40,10 +39,7 @@ class ProgramNode(Node):
         return f"{self.heading.to_string(context)}{self.block.to_string(context)}"
 
     def to_vm(self, context: Context) -> str:
-        vm_code = ["START"]
-        vm_code.extend(self.block.to_vm(context).split("\n"))
-        vm_code.append("STOP")
-        return "\n".join(line for line in vm_code if line.strip())
+        return "\n".join(line for line in self.block.to_vm(context, True).split("\n") if line.strip())
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
@@ -105,7 +101,7 @@ class IdentifierNode(Node):
     def to_vm(self, context: Context) -> str:
         # Get variable address and load its value from global memory
         addr = context.get_var_address(self.value)
-        return f"PUSHG {addr}  // Load {self.value}"
+        return f"PUSHG {addr}"
 
     def validate(self, context) -> Tuple[bool, List[str]]:
         return True, []
@@ -129,10 +125,24 @@ class BlockNode(Node):
         decls = self.declarations.to_string(context)
         return f"{decls}\n{self.compound_stmt.to_string(context)}"
 
-    def to_vm(self, context: Context) -> str:
-        decls = self.declarations.to_vm(context)
+    def to_vm(self, context: Context, in_global_scope: bool) -> str:
+        variable_decls = ""
+        function_decls = ""
+        
+        for decl in self.declarations.declarations:
+            if isinstance(decl, VariableDeclarationBlock):
+                # Handle variable declarations
+                variable_decls += decl.to_vm(context) + "\n"
+            else:
+                function_decls += decl.to_vm(context) + "\n"
+
         stmts = self.compound_stmt.to_vm(context)
-        return f"{decls}\n{stmts}".strip()
+
+        if in_global_scope:
+            return f"{variable_decls}\nSTART\n{stmts}\nSTOP\n{function_decls}".strip()
+        else:
+            return f"{variable_decls}\n{stmts}".strip()
+
 
     def validate(self, context) -> Tuple[bool, List[str]]:
         return True, []
@@ -162,7 +172,14 @@ class DeclarationsNode(Node):
         return "\n".join(decl.to_string(context) for decl in self.declarations)
 
     def to_vm(self, context: Context) -> str:
-        return ""
+        vm_code = []
+        for decl in self.declarations:
+            if isinstance(decl, VariableDeclarationBlock):
+                # TODO: Append to vm code
+                decl.to_vm(context)
+            if not isinstance(decl, VariableDeclarationBlock):
+                vm_code.append(decl.to_vm(context))
+        return "\n".join(vm_code).strip()
 
     def validate(self, context) -> Tuple[bool, List[str]]:
         return True, []
@@ -256,34 +273,45 @@ class CallStatementNode(Node):
         if proc_name == "writeln" or proc_name =="write":
             vm_code = []
             for expr in self.expr_list.expressions:
-                vm_code.append(expr.to_vm(context))
+                vm_code.append(expr.to_vm(context))                
                 if isinstance(expr, StringNode):
                     vm_code.append("WRITES")
                 else:
-                    vm_code.append("WRITEI")
+                    if isinstance(expr, SimpleExpressionNode):
+                        pass
+                    elif context.get_var_type(expr.identifier.value) == "real":
+                        vm_code.append("WRITEF")
+                    elif context.get_var_type(expr.identifier.value) == "string":
+                        vm_code.append("WRITES")
+                    else:
+                        vm_code.append("WRITEI")
             vm_code.append("WRITELN")
             return "\n".join(vm_code)
         elif proc_name == "readln":
             var = self.expr_list.expressions[0]
             var_addr = context.get_var_address(var.identifier.value)
-            return f"READ\nATOI\nSTOREG {var_addr}"
+            var_type = context.get_var_type(var.identifier.value)
+
+            if isinstance(var.identifier, IndexedVariableNode):
+                return f"READ\nATOI\nSTORE 2"
+
+            conversion = "" 
+            if var_type == "Integer" or var_type=="integer":
+                conversion = "ATOI\n"
+
+            return f"READ\n{conversion}STOREG {var_addr}"
         elif proc_name == "length":
             var = self.expr_list.expressions[0]
             var_addr = context.get_var_address(var.identifier.value)
             return f"PUSHG {var_addr}\nSTRLEN"
         else:
             # Handle user-defined procedures
-            procedure = context.get_procedure(proc_name)
-            if procedure:
-                # Generate unique label for this procedure call
-                label = context.get_next_label()
-                vm_code = [
-                    f"PUSHA PROC_{proc_name}_{label}",  # Push return address
-                    f"JUMP PROC_{proc_name}",           # Jump to procedure
-                    f"PROC_{proc_name}_{label}:"        # Return label
-                ]
-                return "\n".join(vm_code)
-            raise Exception(f"Undefined procedure: {proc_name}")
+            if context.is_function(self.identifier.value):
+                return f"PUSHA func{self.identifier.value}\nCALL"
+            elif context.is_procedure(self.identifier.value):
+                return f"PUSHA proc{self.identifier.value}\nCALL"
+            raise Exception(f"Undefined function: {self.identifier.value}")
+
 
 
 
@@ -373,10 +401,16 @@ class VariableDeclarationBlock(Node):
     def to_vm(self, context: Context) -> str:
         vm_code = []
         for decl in self.declarations:
-            for id_node in decl.identifier_list.identifiers:
-                addr = context.allocate_var_address(id_node.value)
-                vm_code.append(f"PUSHI 0  // Initialize {id_node.value}")
-                vm_code.append(f"STOREG {addr}")
+            for identifier in decl.identifier.identifiers:
+                if isinstance(decl.type_node, ArrayTypeNode):
+                    # This is an array declaration
+                    if isinstance(decl.type_node.index_type, SubRangeTypeNode):
+                        # Handle subrange type
+                        index_type = decl.type_node.index_type
+                        vm_code.append(f"ALLOC {index_type.upper_bound.value - index_type.lower_bound.value}")
+                else:
+                    context.add_variable(identifier.value, decl.type_node.value)
+                
         return "\n".join(vm_code)
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
@@ -524,7 +558,14 @@ class VariableNode(Node):
         return self.identifier.to_string(context)
 
     def to_vm(self, context: Context) -> str:
-        # Get variable address and load its value from global memory
+        if isinstance(self.identifier, IndexedVariableNode):
+            # Handle indexed variable (array access)
+            addr = context.get_var_address(self.identifier.identifier.value)
+            index_code = self.identifier.index.to_vm(context)
+            return f"// TODO: load indexed variable ({self.identifier.identifier.value}) value"
+        if self.identifier.value and context.is_function(self.identifier.value):
+            # This is actually a function with no arguments
+            return f"PUSHA func{self.identifier.value}\nCALL"
         addr = context.get_var_address(self.identifier.value)
         return f"PUSHG {addr}  // Load {self.identifier.value}"
 
@@ -628,7 +669,6 @@ class ExpressionNode(Node):
         if isinstance(self.operator, RelationalOperatorNode):
             return f"{left_code}\n{right_code}\n{self.operator.to_vm(context)}"
 
-        print(f"Converting Expression operation: {self.operator.value}")
         op = op_map.get(self.operator.value, "NOP")
 
         return f"{left_code}\n{right_code}\n{op}"
@@ -746,7 +786,6 @@ class ForStatementNode(Node):
         )
 
     def to_vm(self, context: Context) -> str:
-        print(f"Converting ForStatement: {self.identifier.value}")
         label_count = context.get_next_label()
         loop_label = f"loop{label_count}"
         end_label = f"endloop{label_count}"
@@ -829,7 +868,6 @@ class TermNode(Node):
         return f"{self.left.to_string(context)} {self.operator.to_string(context)} {self.right.to_string(context)}"
 
     def to_vm(self, context: Context) -> str:
-        print(f"Converting Term operation: {self.operator.value}")
         left_code = self.left.to_vm(context)
         right_code = self.right.to_vm(context)
         op_map = {
@@ -1006,6 +1044,10 @@ class UnsignedIntegerNode(Node):
         node_id = len(graph.body)
         graph.node(str(node_id), f"{self.name}: {self.value}")
         return node_id
+    
+    def get_value(self) -> int:
+        """Returns the integer value of this node."""
+        return int(self.value)
 
 
 class UnsignedRealNode(Node):
@@ -1017,7 +1059,7 @@ class UnsignedRealNode(Node):
         return self.value
 
     def to_vm(self, context: Context) -> str:
-        return f"PUSHS {self.value}"
+        return f"PUSHF {self.value}"
 
     def validate(self, context: Context) -> Tuple[bool, List[str]]:
         return True, []
@@ -1794,7 +1836,7 @@ class ParameterGroupNode(Node):
 
 
 class FunctionDeclarationNode(Node):
-    def __init__(self, identifier: Node, params: Node, return_type: Node, block: Node):
+    def __init__(self, identifier: Node, params: Node, return_type: Node, block: Node):        
         super().__init__("functionDeclaration", [identifier, params, return_type, block])
         self.identifier = identifier
         self.params = params
@@ -1806,33 +1848,31 @@ class FunctionDeclarationNode(Node):
         return f"function {self.identifier.to_string(context)}{params}: {self.return_type.to_string(context)};\n{self.block.to_string(context)}"
 
     def to_vm(self, context: Context) -> str:
+        safe_function_identifier = self.identifier.value
         # Get unique label for function
-        func_label = f"FUNC_{self.identifier.value}"
-        end_label = f"END_{self.identifier.value}"
+        func_label = f"func{safe_function_identifier}"
+
+        context.add_function(func_label, self.return_type.value, self.params)
         
         # Store function parameters
         param_setup = []
-        if self.params:
+        if self.params and not isinstance(self.params, EmptyStatementNode):
             for i, param in enumerate(self.params.parameters):
-                addr = context.allocate_var_address(param.identifier.value)
-                param_setup.append(f"STOREG {addr}  // Store param {param.identifier.value}")
+                addr = context.allocate_var_address(safe_function_identifier)
 
         vm_code = [
             f"{func_label}:",  # Function label
-            "PUSHN 1  // Reserve space for return value"
         ]
         
         # Add parameter setup code
         vm_code.extend(param_setup)
         
         # Add function body code
-        vm_code.append(self.block.to_vm(context))
+        vm_code.append(self.block.to_vm(context, False))
         
         # Add return sequence
         vm_code.extend([
-            f"STOREL -1  // Store return value",
-            "RETURN",
-            f"{end_label}:"
+            "RETURN"
         ])
         
         return "\n".join(vm_code)

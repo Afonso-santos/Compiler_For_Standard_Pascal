@@ -1,10 +1,20 @@
-program Test;
+program ExemploVariaveis;
 
-procedure Greet;
-begin
-    writeln('Hello from a procedure!');
-end;
+var
+  nome: string;
+  idade: integer;
+  altura: real;
 
 begin
-    Greet;
+  { Atribuindo valores às variáveis }
+  nome := 'Ana';
+  idade := 25;
+  altura:= 1.70;
+
+
+  { Exibindo os valores das variáveis }
+  writeln('Nome: ', nome);
+  writeln('Idade: ', idade);
+  writeln('Altura:', altura);
+
 end.
