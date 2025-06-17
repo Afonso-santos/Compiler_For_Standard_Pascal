@@ -1,4 +1,21 @@
-# Pascal Compiler
+#🛠️ Language Processing – Pascal Compiler Project
+
+## Grade: 18/20 ⭐️
+📚 This document presents information related to the Practical Assignment for the Language Processing course, part of the 2nd semester of the 3rd year of the Bachelor's degree in Computer Engineering at the University of Minho, during the 2024/2025 academic year.
+
+This repository contains the practical assignment developed for the Language Processing course, focused on building a compiler for the Pascal Standard language. The compiler supports variable declarations, arithmetic expression evaluation, control flow commands (if, while, for), and optionally, the implementation of subprograms (procedures and functions).
+
+The main objective was to implement a complete compilation pipeline, composed of the following stages:
+
+- Lexical Analysis
+
+- Syntactic Analysis
+
+- Semantic Analysis
+
+- Code Generation targeting a virtual machine provided to students
+
+This report describes in detail the functionalities implemented by the group, the technical decisions made, challenges encountered, and solutions adopted. Wherever relevant, code examples, diagrams, and test cases are presented to illustrate the operation and validation of the developed compiler.
 
 # Setup
 
@@ -33,24 +50,3 @@ To exit the virtual environment, you can run:
 ```
 $ deactivate
 ```
-
-# Developers
-
-All code must be verified with the `pylint` and `mypy` static checkers, which can be installed
-(inside the `venv`) with the following command:
-
-```
-$ pip install pylint mypy black
-```
-
-Before opening a Pull Request, please run your code though `pylint`, `mypy` and `black` fixing any error
-that may appear:
-
-```
-$ black server client certificate_authority
-$ pylint server client certificate_authority
-$ mypy server client certificate_authority   
-```
-
-Our configuration for these checkers disallows the use of dynamic typing, and your PR won't be
-accepted if these checks are failing.
