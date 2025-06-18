@@ -1,4 +1,4 @@
-#🛠️ Language Processing – Pascal Compiler Project
+# 🛠️ Language Processing – Pascal Compiler Project
 
 ## Grade: 18/20 ⭐️
 📚 This document presents information related to the Practical Assignment for the Language Processing course, part of the 2nd semester of the 3rd year of the Bachelor's degree in Computer Engineering at the University of Minho, during the 2024/2025 academic year.
