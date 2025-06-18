@@ -50,3 +50,8 @@ To exit the virtual environment, you can run:
 ```
 $ deactivate
 ```
+
+## Authors
+- A104276 - Afonso Dionísio
+- A104356 - João Lobo
+- A104439 - Rita Camacho
